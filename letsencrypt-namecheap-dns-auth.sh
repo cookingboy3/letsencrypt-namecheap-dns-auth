@@ -1,4 +1,4 @@
-#!/bin/sh
+#!/bin/bash
 
 ####### !!!!!!!!!!!!!  W A R N I N G !!!!!!!!!!!!! ####### 
 #
@@ -26,7 +26,7 @@
 # the SANDBOX section below.
 
 # QuickStart: Don't quickstart.  Read everything up to this point first.
-#	You'll need the wget and dig commands available
+#	You'll need the curl and dig commands available
 #	Enable API access on your NameCheap Account and obtain your APIKey
 #	In NameCheap's API section, whitelist the IP of the server
 #		from where you will run this script
@@ -58,7 +58,7 @@
 # CERTBOT_ALL_DOMAINS: A comma-separated list of all domains challenged for the current
 
 # NameCheap's production API service base
-SERVICEURL="https://api.namecheap.com/xml.response"
+#SERVICEURL="https://api.namecheap.com/xml.response"
 
 
 # --------------- Start configurable section --------------------------------
@@ -66,10 +66,10 @@ SERVICEURL="https://api.namecheap.com/xml.response"
 # your NameCheap login ID
 # (their docs mention both API User and NC User, but they are the same
 # in our scenario because we are editing our own records and not one of our 'clients')
-NCUSER=myUserID
+NCUSER=superluser
 
 # your whitelisted IP address
-CLIENTIP=8.8.8.8
+CLIENTIP=127.0.0.1
 
 # your API Key
 NCAPIKEY=9zzzzzzzzzzzzzzzzzzzzzzzzzzzzzf4
@@ -83,9 +83,9 @@ NCAPIKEY=9zzzzzzzzzzzzzzzzzzzzzzzzzzzzzf4
 # with the dummy value you specify below
 #
 #SERVICEURL="https://api.sandbox.namecheap.com/xml.response"
-#NCAPIKEY=2czzzzzzzzzzzzzzzzzzzzzzzzzzzz1c
-#CERTBOT_DOMAIN=crosswire.org
-#CERTBOT_VALIDATION=xyzzq
+#NCAPIKEY=bbbbbbbbbbbbbbbbbbbbbbbbbbb
+#CERTBOT_DOMAIN=example.com
+#CERTBOT_VALIDATION=reallyteststring
 
 
 # number of seconds to wait between checks for our certbot validation records to finish propagation
@@ -93,7 +93,7 @@ WAITSECONDS=10
 
 # if we are running a local bind server to cache DNS entries, we probably want to flush our cache
 # between each check for our challenge certificate
-FLUSH_LOCAL_BIND_SERVER=true
+FLUSH_LOCAL_BIND_SERVER=false
 
 # --------------- End configurable section --------------------------------
 
@@ -104,10 +104,16 @@ TLD=$(echo ${CERTBOT_DOMAIN} | rev | cut -d. -f1 | rev)
 SLD=$(echo ${CERTBOT_DOMAIN} | rev | cut -d. -f2 | rev)
 
 
-APICOMMAND="namecheap.domains.dns.getHosts&SLD=${SLD}&TLD=${TLD}"
-wget -O /tmp/getHosts.xml "${SERVICEURL}?ClientIp=${CLIENTIP}&ApiUser=${NCUSER}&ApiKey=${NCAPIKEY}&UserName=${NCUSER}&Command=${APICOMMAND}"
+curl -o /tmp/getHosts.xml "${SERVICEURL}" \
+-d ClientIP=${CLIENTIP} \
+-d ApiUser=${NCUSER} \
+-d ApiKey=${NCAPIKEY} \
+-d UserName=${NCUSER} \
+-d Command=namecheap.domains.dns.getHosts \
+-d SLD=${SLD} \
+-d TLD=${TLD}
 
-APICOMMAND="namecheap.domains.dns.setHosts&SLD=${SLD}&TLD=${TLD}"
+CURLCOMMAND="-d Command="namecheap.domains.dns.setHosts" -d SLD=${SLD} -d TLD=${TLD}"
 ENTRYNUM=1;
 while IFS= read -r line; do
 	NAME=$(echo $line|sed 's/^.* Name="\([^"]*\)".*$/\1/g')
@@ -125,18 +131,17 @@ while IFS= read -r line; do
 		# skip all existing _acme-challenge entries
 		true
 	else
-		APICOMMAND="${APICOMMAND}&HostName${ENTRYNUM}=${NAME}&RecordType${ENTRYNUM}=${TYPE}&Address${ENTRYNUM}=${ADDRESS}&MXPref${ENTRYNUM}=${MXPREF}&TTL${ENTRYNUM}=${TTL}"
-
+		CURLCOMMAND="${CURLCOMMAND} -d HostName${ENTRYNUM}=${NAME} -d RecordType${ENTRYNUM}=${TYPE} -d Address${ENTRYNUM}=${ADDRESS} -d MXPref${ENTRYNUM}=${MXPREF} -d TTL${ENTRYNUM}=${TTL}"
 		ENTRYNUM=$((${ENTRYNUM} + 1))
 	fi
 done <<< "$(grep "<host " /tmp/getHosts.xml)"
 
 
 # OK, now let's add our new acme challenge verification record
-APICOMMAND="${APICOMMAND}&HostName${ENTRYNUM}=_acme-challenge&RecordType${ENTRYNUM}=TXT&Address${ENTRYNUM}=${CERTBOT_VALIDATION}"
+CURLCOMMAND="${CURLCOMMAND} -d HostName${ENTRYNUM}="_acme-challenge" -d RecordType${ENTRYNUM}=TXT -d Address${ENTRYNUM}=${CERTBOT_VALIDATION}"
 
 # Finally, we'll update all host DNS records
-wget -O /tmp/testapi.out "${SERVICEURL}?ClientIp=${CLIENTIP}&ApiUser=${NCUSER}&ApiKey=${NCAPIKEY}&UserName=${NCUSER}&Command=${APICOMMAND}"
+curl -o /tmp/testapi.out "${SERVICEURL}" -d ClientIP=${CLIENTIP} -d ApiUser=${NCUSER} -d ApiKey=${NCAPIKEY} -d UserName=${NCUSER} ${CURLCOMMAND}
 
 # Actually, FINALLY, we need to wait for our records to propagate before letting certbot continue.
 # Because we "echo" output here, certbot thinks something might have gone wrong.  It doesn't effect
